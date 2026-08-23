@@ -147,7 +147,8 @@ public class IPackageManagerProxy extends BinderInvocationStub {
                         if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
                                 || perm.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
                                 || perm.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
-                                || perm.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT))) {
+                                || perm.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT)
+                                || isNetworkPermission(perm))) {
                             packageInfo.requestedPermissionsFlags[i] |= PackageInfo.REQUESTED_PERMISSION_GRANTED;
                         }
                     }
@@ -432,8 +433,18 @@ public class IPackageManagerProxy extends BinderInvocationStub {
                 Slog.d(TAG, "SimpleAudioPermissionHook: Granting notification/Xiaomi permission: " + permission + " to " + packageName);
                 return PackageManager.PERMISSION_GRANTED;
             }
-            
-            
+
+            // The cloned package is not installed in the real system PackageManager, so a
+            // package-name based checkPermission for INTERNET falls through to the real PM
+            // and returns DENIED. Apps / WebView wrapper libs that self-check INTERNET this
+            // way then force WebView into cache-only mode -> net::ERR_CACHE_MISS. The clone
+            // actually has working network (host process holds INTERNET), so report it granted.
+            if (isNetworkPermission(permission)) {
+                Slog.d(TAG, "SimpleAudioPermissionHook: Granting network permission: " + permission + " to " + packageName);
+                return PackageManager.PERMISSION_GRANTED;
+            }
+
+
             return method.invoke(who, args);
         }
     }
@@ -462,8 +473,13 @@ public class IPackageManagerProxy extends BinderInvocationStub {
                 Slog.d(TAG, "CheckSelfPermission: Granting notification/Xiaomi permission: " + permission + " to " + packageName);
                 return PackageManager.PERMISSION_GRANTED;
             }
-            
-            
+
+            if (isNetworkPermission(permission)) {
+                Slog.d(TAG, "CheckSelfPermission: Granting network permission: " + permission + " to " + packageName);
+                return PackageManager.PERMISSION_GRANTED;
+            }
+
+
             return method.invoke(who, args);
         }
     }
@@ -526,6 +542,13 @@ public class IPackageManagerProxy extends BinderInvocationStub {
     }
 
     
+    private static boolean isNetworkPermission(String permission) {
+        if (permission == null) return false;
+        return permission.equals(android.Manifest.permission.INTERNET)
+                || permission.equals(android.Manifest.permission.ACCESS_NETWORK_STATE)
+                || permission.equals(android.Manifest.permission.ACCESS_WIFI_STATE);
+    }
+
     private static boolean isStorageOrMediaPermission(String permission) {
         if (permission == null) return false;
         

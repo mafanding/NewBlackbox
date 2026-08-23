@@ -181,11 +181,16 @@ public class PackageManagerCompat {
                 for (int i = 0; i < N; i++) {
                     final String perm = p.requestedPermissions.get(i);
                     pi.requestedPermissions[i] = perm;
-                    
-
-
-
-
+                    // Mark declared install-time network permissions as granted. The clone is
+                    // not registered in the real system PM, so these flags would otherwise stay
+                    // 0 and callers that read requestedPermissionsFlags (e.g. WebView wrapper
+                    // libraries deciding whether to allow network) would treat INTERNET as
+                    // denied, forcing cache-only loads (net::ERR_CACHE_MISS).
+                    if (perm != null && (perm.equals(android.Manifest.permission.INTERNET)
+                            || perm.equals(android.Manifest.permission.ACCESS_NETWORK_STATE)
+                            || perm.equals(android.Manifest.permission.ACCESS_WIFI_STATE))) {
+                        pi.requestedPermissionsFlags[i] |= PackageInfo.REQUESTED_PERMISSION_GRANTED;
+                    }
                 }
             }
         }
