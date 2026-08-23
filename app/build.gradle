@@ -28,6 +28,18 @@ android {
         }
     }
 
+    signingConfigs {
+        debug {
+            // Fixed, committed debug keystore so every build (local and CI) shares one
+            // signature. Without this, CI regenerates ~/.android/debug.keystore each run,
+            // giving each release a different signature (no in-place upgrades).
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
         release {
             signingConfig signingConfigs.debug
