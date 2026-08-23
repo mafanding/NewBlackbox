@@ -392,6 +392,38 @@ public class BActivityThread extends IBActivityThread.Stub {
             WebView.setDataDirectorySuffix(getUserId() + ":" + packageName + ":" + processName);
         }
 
+        // [DIAG] Enable WebView remote debugging (chrome://inspect) and log the clone's
+        // real permission + connectivity state, to diagnose net::ERR_CACHE_MISS.
+        try {
+            WebView.setWebContentsDebuggingEnabled(true);
+            Log.i("BBWebViewDiag", "setWebContentsDebuggingEnabled(true) ok for " + packageName);
+        } catch (Throwable t) {
+            Log.w("BBWebViewDiag", "setWebContentsDebuggingEnabled failed: " + t);
+        }
+        try {
+            Context dctx = BlackBoxCore.getContext();
+            int amsPerm = dctx.checkPermission(android.Manifest.permission.INTERNET, android.os.Process.myPid(), android.os.Process.myUid());
+            int pmPerm = dctx.getPackageManager().checkPermission(android.Manifest.permission.INTERNET, packageName);
+            Log.i("BBWebViewDiag", "pkg=" + packageName + " myUid=" + android.os.Process.myUid()
+                    + " hostUid=" + BlackBoxCore.getHostUid() + " bUid=" + BlackBoxCore.getBUid()
+                    + " AMS.checkPermission(INTERNET,pid,uid)=" + amsPerm
+                    + " PM.checkPermission(INTERNET,pkg)=" + pmPerm + " [GRANTED=0,DENIED=-1]");
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) dctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                android.net.NetworkInfo ani = cm.getActiveNetworkInfo();
+                android.net.Network an = cm.getActiveNetwork();
+                android.net.NetworkCapabilities nc = (an != null) ? cm.getNetworkCapabilities(an) : null;
+                boolean hasInternet = nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+                Log.i("BBWebViewDiag", "activeNetworkInfo=" + ani
+                        + " isConnected=" + (ani != null && ani.isConnected())
+                        + " activeNetwork=" + an + " hasINTERNETcap=" + hasInternet + " caps=" + nc);
+            } else {
+                Log.w("BBWebViewDiag", "ConnectivityManager is null");
+            }
+        } catch (Throwable t) {
+            Log.w("BBWebViewDiag", "net diag failed: " + t, t);
+        }
+
         VirtualRuntime.setupRuntime(processName, applicationInfo);
 
         BRVMRuntime.get(BRVMRuntime.get().getRuntime()).setTargetSdkVersion(applicationInfo.targetSdkVersion);
