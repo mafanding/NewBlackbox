@@ -1,0 +1,134 @@
+name: Build & Release APK
+
+# Builds the release APK(s) and publishes them to a GitHub Release.
+#
+# How to trigger:
+#   1. Push a version tag, e.g.  git tag v4.0.0 && git push origin v4.0.0
+#      -> a Release named after the tag is created automatically.
+#   2. Actions tab -> "Build & Release APK" -> "Run workflow"
+#      -> optionally pass a custom tag; otherwise one is derived from the
+#         app versionName + run number.
+#
+# The release build is signed with the debug keystore (see app/build.gradle:
+# `signingConfig signingConfigs.debug`), so no signing secrets are required.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create (leave blank to auto-generate from versionName)'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Mark the release as a pre-release'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write   # required for creating releases and uploading assets
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required NDK (29.0.13846066)
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install "ndk;29.0.13846066"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build release APK(s)
+        run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Resolve release metadata
+        id: meta
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          # Extract versionName from the root build.gradle (e.g. 4.0.0)
+          VERSION_NAME=$(grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' build.gradle | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_NAME=${VERSION_NAME:-0.0.0}
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            TAG="$REF_NAME"
+          elif [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="v${VERSION_NAME}-build.${RUN_NUMBER}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved version=$VERSION_NAME tag=$TAG"
+
+      - name: List built APKs and build release notes
+        env:
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          echo "APKs in app/build/outputs/apk/release:"
+          ls -lh app/build/outputs/apk/release/*.apk
+
+          # Generate release notes listing the APKs that were actually produced,
+          # so the body stays correct regardless of how many ABI variants build.
+          {
+            echo "Automated release build of **BlackBox ${VERSION_NAME}**."
+            echo ""
+            echo "APK variants (all signed with the auto-generated **debug** keystore):"
+            for APK in app/build/outputs/apk/release/*.apk; do
+              [ -f "$APK" ] || continue
+              SIZE=$(du -h "$APK" | cut -f1)
+              echo "- \`$(basename "$APK")\` — ${SIZE}"
+            done
+            echo ""
+            echo "> Note: these APKs are debug-signed. The debug keystore is regenerated on each"
+            echo "> CI runner, so signatures may differ between releases; you may need to uninstall"
+            echo "> a previous build before installing a new one."
+            echo ""
+            echo "Built from commit ${GITHUB_SHA}."
+          } > RELEASE_BODY.md
+
+          echo "--- RELEASE_BODY.md ---"
+          cat RELEASE_BODY.md
+
+      - name: Upload APKs as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlackBox-release-apks
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: BlackBox ${{ steps.meta.outputs.version_name }} (${{ steps.meta.outputs.tag }})
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: app/build/outputs/apk/release/*.apk
+          body_path: RELEASE_BODY.md
