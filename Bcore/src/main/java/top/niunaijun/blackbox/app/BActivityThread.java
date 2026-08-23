@@ -423,34 +423,31 @@ public class BActivityThread extends IBActivityThread.Stub {
         } catch (Throwable t) {
             Log.w("BBWebViewDiag", "net diag failed: " + t, t);
         }
-        // [DIAG] Create our own WebView a few seconds after bind and log the flag that
-        // actually forces cache-only (getBlockNetworkLoads), plus do a test network load.
+        // [DIAG] Synchronously create our own WebView here (on BlackBox's bootstrap thread,
+        // before the guest app takes over the main thread) and read the flag that actually
+        // forces cache-only: getBlockNetworkLoads(). This is a synchronous read, so it does
+        // not depend on the main looper being free.
         try {
-            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-                @Override public void run() {
-                    try {
-                        WebView tw = new WebView(BlackBoxCore.getContext());
-                        android.webkit.WebSettings ws = tw.getSettings();
-                        Log.i("BBWebViewDiag", "SELFTEST getBlockNetworkLoads=" + ws.getBlockNetworkLoads()
-                                + " cacheMode=" + ws.getCacheMode() + " jsEnabled=" + ws.getJavaScriptEnabled());
-                        tw.setWebViewClient(new android.webkit.WebViewClient() {
-                            @Override public void onReceivedError(WebView v, android.webkit.WebResourceRequest req, android.webkit.WebResourceError err) {
-                                Log.i("BBWebViewDiag", "SELFTEST onReceivedError code=" + err.getErrorCode()
-                                        + " desc=" + err.getDescription() + " url=" + (req != null ? req.getUrl() : null));
-                            }
-                            @Override public void onPageFinished(WebView v, String url) {
-                                Log.i("BBWebViewDiag", "SELFTEST onPageFinished url=" + url);
-                            }
-                        });
-                        Log.i("BBWebViewDiag", "SELFTEST loading https://example.com ...");
-                        tw.loadUrl("https://example.com/");
-                    } catch (Throwable t2) {
-                        Log.w("BBWebViewDiag", "SELFTEST webview failed: " + t2, t2);
-                    }
+            Log.i("BBWebViewDiag", "SELFTEST creating WebView...");
+            WebView tw = new WebView(BlackBoxCore.getContext());
+            android.webkit.WebSettings ws = tw.getSettings();
+            Log.i("BBWebViewDiag", "SELFTEST getBlockNetworkLoads=" + ws.getBlockNetworkLoads()
+                    + " cacheMode=" + ws.getCacheMode() + " jsEnabled=" + ws.getJavaScriptEnabled()
+                    + " userAgent=" + ws.getUserAgentString());
+            tw.setWebViewClient(new android.webkit.WebViewClient() {
+                @Override public void onReceivedError(WebView v, android.webkit.WebResourceRequest req, android.webkit.WebResourceError err) {
+                    Log.i("BBWebViewDiag", "SELFTEST onReceivedError code=" + err.getErrorCode()
+                            + " desc=" + err.getDescription() + " url=" + (req != null ? req.getUrl() : null));
                 }
-            }, 6000);
-        } catch (Throwable t) {
-            Log.w("BBWebViewDiag", "SELFTEST schedule failed: " + t);
+                @Override public void onPageFinished(WebView v, String url) {
+                    Log.i("BBWebViewDiag", "SELFTEST onPageFinished url=" + url);
+                }
+            });
+            Log.i("BBWebViewDiag", "SELFTEST loading https://example.com ...");
+            tw.loadUrl("https://example.com/");
+            Log.i("BBWebViewDiag", "SELFTEST loadUrl returned");
+        } catch (Throwable t2) {
+            Log.w("BBWebViewDiag", "SELFTEST webview failed: " + t2, t2);
         }
 
         VirtualRuntime.setupRuntime(processName, applicationInfo);
