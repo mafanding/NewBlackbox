@@ -93,6 +93,7 @@ public class BActivityThread extends IBActivityThread.Stub {
     private static BActivityThread sBActivityThread;
     private AppBindData mBoundApplication;
     private Application mInitialApplication;
+    private static WebView sDiagWebView; // [DIAG] strong ref for the self-test WebView
     private AppConfig mAppConfig;
     private final List<ProviderInfo> mProviders = new ArrayList<>();
     private final Handler mH = BlackBoxCore.get().getHandler();
@@ -423,6 +424,24 @@ public class BActivityThread extends IBActivityThread.Stub {
         } catch (Throwable t) {
             Log.w("BBWebViewDiag", "net diag failed: " + t, t);
         }
+        // [DIAG] Raw socket/DNS/TLS reachability test on a background thread (no main looper
+        // needed, no WebView involved) — proves whether the clone can reach the internet.
+        new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                            new java.net.URL("https://example.com/").openConnection();
+                    c.setConnectTimeout(8000);
+                    c.setReadTimeout(8000);
+                    int code = c.getResponseCode();
+                    Log.i("BBWebViewDiag", "HTTPTEST example.com responseCode=" + code);
+                    c.disconnect();
+                } catch (Throwable t) {
+                    Log.w("BBWebViewDiag", "HTTPTEST failed: " + t, t);
+                }
+            }
+        }).start();
+
         // [DIAG] Synchronously create our own WebView here (on BlackBox's bootstrap thread,
         // before the guest app takes over the main thread) and read the flag that actually
         // forces cache-only: getBlockNetworkLoads(). This is a synchronous read, so it does
@@ -430,6 +449,7 @@ public class BActivityThread extends IBActivityThread.Stub {
         try {
             Log.i("BBWebViewDiag", "SELFTEST creating WebView...");
             WebView tw = new WebView(BlackBoxCore.getContext());
+            sDiagWebView = tw; // keep a strong ref so the async load is not GC-cancelled
             android.webkit.WebSettings ws = tw.getSettings();
             Log.i("BBWebViewDiag", "SELFTEST getBlockNetworkLoads=" + ws.getBlockNetworkLoads()
                     + " cacheMode=" + ws.getCacheMode() + " jsEnabled=" + ws.getJavaScriptEnabled()
